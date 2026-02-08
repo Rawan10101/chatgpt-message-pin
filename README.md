@@ -12,7 +12,11 @@ A Chrome extension that lets you pin important messages in ChatGPT conversations
 - **Persistent Storage** - Your pins are saved and persist across sessions  
 - **ChatGPT-Style Design** - Seamlessly integrates with ChatGPT's interface  
 - **Responsive** - Works on desktop and mobile views 
-- **Pin ChatGPT Responses** - Pin button appears only on ChatGPT's messages , not your own messages 
+- **Pin ChatGPT Responses** - Pin button appears only on ChatGPT's messages , not your own messages
+  
+## Visuals
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/8b099216-2740-4350-9a50-8a44afbdb53b" />
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/a2e587b5-ecc3-45e4-a352-341f6e67a648" />
 
 ## Installation
 
@@ -120,7 +124,7 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## License
 
-MIT License - feel free to use this extension however you'd like!
+MIT License - feel free to use this extension however you'd like.
 
 ## Support
 
