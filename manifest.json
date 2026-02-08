@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Message Pinner",
+  "version": "1.0.0",
+  "description": "Pin important messages in ChatGPT conversations and jump back to them anytime",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://chat.openai.com/*",
+    "https://chatgpt.com/*"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/pin-icon.png",
+      "48": "icons/pin-icon.png",
+      "128": "icons/pin-icon.png"
+    },
+    "default_title": "ChatGPT Pinner"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "utils/storage.js",
+        "content.js"
+      ],
+      "css": [
+        "panel/panel.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/pin-icon.png",
+    "48": "icons/pin-icon.png",
+    "128": "icons/pin-icon.png"
+  }
+}

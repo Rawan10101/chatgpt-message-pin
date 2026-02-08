@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pinned Messages Panel</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div id="pinned-messages-panel" class="pinned-panel">
+    <div class="panel-header">
+      <h3>Pinned Messages</h3>
+      <div class="panel-actions">
+        <button id="clear-all-pins" title="Clear all pins">Clear</button>
+        <button id="close-panel" title="Close">✕</button>
+      </div>
+    </div>
+    <div class="panel-content" id="panel-content">
+      <p class="no-pins">No pinned messages yet</p>
+    </div>
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+</html>

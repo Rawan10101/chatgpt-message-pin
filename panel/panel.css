@@ -1,0 +1,353 @@
+.pin-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s ease;
+  color: #8e8ea0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.pin-button:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  opacity: 1 !important;
+}
+
+.pin-button.pinned {
+  opacity: 1 !important;
+  background: rgba(25, 195, 125, 0.2);
+  border-color: rgba(25, 195, 125, 0.5);
+  color: #19c37d;
+}
+
+.pin-button.pinned:hover {
+  background: rgba(25, 195, 125, 0.3);
+}
+
+/* Show pin button on hover */
+[data-testid^="conversation-turn-"]:hover .pin-button {
+  opacity: 0.7;
+}
+
+/* Floating toggle button */
+.toggle-pins-btn {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  width: 60px;
+  height: 50px;
+  border-radius: 8px;
+  background: #19c37d;
+  color: white;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toggle-pins-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  background: #15a368;
+}
+
+.toggle-pins-btn:active {
+  transform: scale(0.95);
+}
+
+/* Pinned messages panel */
+.pinned-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 350px;
+  height: 100vh;
+  background: #2f2f2f;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.3s ease;
+  color: #ececf1;
+}
+
+.pinned-panel.hidden {
+  transform: translateX(100%);
+}
+
+/* Panel header */
+.panel-header {
+  padding: 20px;
+  border-bottom: 1px solid #444;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #202020;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.panel-actions button {
+  background: transparent;
+  border: 1px solid #555;
+  color: #ececf1;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 16px;
+}
+
+.panel-actions button:hover {
+  background: #444;
+  border-color: #666;
+}
+
+/* Panel content */
+.panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.panel-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.panel-content::-webkit-scrollbar-track {
+  background: #2f2f2f;
+}
+
+.panel-content::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.panel-content::-webkit-scrollbar-thumb:hover {
+  background: #666;
+}
+
+/* No pins message */
+.no-pins {
+  text-align: center;
+  color: #8e8ea0;
+  padding: 40px 20px;
+  font-size: 14px;
+}
+
+/* Pinned message item */
+.pinned-message {
+  background: #3a3a3a;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #444;
+  transition: all 0.2s;
+}
+
+.pinned-message:hover {
+  background: #404040;
+  border-color: #555;
+}
+
+.pin-text {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+  color: #d1d5db;
+  word-wrap: break-word;
+}
+
+.pin-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pin-date {
+  font-size: 11px;
+  color: #8e8ea0;
+}
+
+.pin-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pin-actions button {
+  background: transparent;
+  border: 1px solid #555;
+  color: #ececf1;
+  border-radius: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.pin-actions button:hover {
+  background: #505050;
+  border-color: #666;
+}
+
+.jump-to-pin:hover {
+  background: rgba(25, 195, 125, 0.2);
+  border-color: #19c37d;
+  color: #19c37d;
+}
+
+.remove-pin:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* Message highlight animation */
+[data-message-number].highlight {
+  animation: highlight-pulse 2s ease;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% {
+    background: transparent;
+  }
+  50% {
+    background: rgba(25, 195, 125, 0.15);
+  }
+}
+
+/* Notification */
+.pin-notification {
+  position: fixed;
+  bottom: 140px;
+  right: 20px;
+  background: #202020;
+  color: #ececf1;
+  padding: 12px 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10001;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: all 0.3s ease;
+  border: 1px solid #19c37d;
+}
+
+.pin-notification.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Dark mode support (ChatGPT uses dark mode) */
+@media (prefers-color-scheme: dark) {
+  .pinned-panel {
+    background: #2f2f2f;
+    color: #ececf1;
+  }
+  
+  .panel-header {
+    background: #202020;
+    border-bottom-color: #444;
+  }
+  
+  .pinned-message {
+    background: #3a3a3a;
+    border-color: #444;
+  }
+}
+
+/* Light mode support (in case user has light theme) */
+@media (prefers-color-scheme: light) {
+  .pinned-panel {
+    background: #ffffff;
+    color: #1f1f1f;
+  }
+  
+  .panel-header {
+    background: #f7f7f8;
+    border-bottom-color: #e5e5e5;
+  }
+  
+  .pinned-message {
+    background: #f9f9f9;
+    border-color: #e5e5e5;
+  }
+  
+  .pin-header {
+    border-bottom-color: #e5e5e5;
+  }
+  
+  .message-number {
+    color: #15a368;
+  }
+  
+  .pin-button {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: #666;
+  }
+  
+  .pin-text {
+    color: #374151;
+  }
+  
+  .pin-date {
+    color: #6b7280;
+  }
+  
+  .panel-actions button,
+  .pin-actions button {
+    background: transparent;
+    border-color: #d1d5db;
+    color: #374151;
+  }
+  
+  .panel-actions button:hover,
+  .pin-actions button:hover {
+    background: #e5e7eb;
+  }
+  
+  .pin-notification {
+    background: #ffffff;
+    color: #1f1f1f;
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .pinned-panel {
+    width: 100%;
+  }
+  
+  .toggle-pins-btn {
+    bottom: 60px;
+    right: 15px;
+    width: 55px;
+    height: 45px;
+    font-size: 11px;
+  }
+}
