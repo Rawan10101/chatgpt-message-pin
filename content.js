@@ -251,7 +251,7 @@ function showSelectionPopup(range, selectedText, messageElement) {
     selectionPopup.querySelector('.add-to-notes-btn').addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      await saveSelectedTextAsNote(selectedText, messageElement);
+      await saveSelectedTextAsNote(selectedText, messageElement, range);
       window.getSelection().removeAllRanges();
       if (selectionPopup) {
         selectionPopup.remove();
@@ -273,7 +273,7 @@ document.addEventListener('mousedown', (e) => {
   }
 });
 
-async function saveSelectedTextAsNote(selectedText, messageElement) {
+async function saveSelectedTextAsNote(selectedText, messageElement, range) {
   try {
     const messageNumber = parseInt(messageElement.dataset.messageNumber);
     
@@ -284,20 +284,32 @@ async function saveSelectedTextAsNote(selectedText, messageElement) {
     
     console.log('Saving note from message', messageNumber);
     
+    // Store selection position for precise jumping
+    const selectionInfo = {
+      text: selectedText,
+      startOffset: range.startOffset,
+      endOffset: range.endOffset,
+      startContainerPath: getNodePath(range.startContainer, messageElement),
+      endContainerPath: getNodePath(range.endContainer, messageElement)
+    };
+    
+    console.log('Selection info:', selectionInfo);
+    
     const noteData = {
       id: `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       text: selectedText,
       messageNumber: messageNumber,
       createdAt: Date.now(),
       url: window.location.href,
-      conversationId: currentConversationId
+      conversationId: currentConversationId,
+      selectionInfo: selectionInfo // Store selection position
     };
 
     const result = await PinStorage.addNote(currentConversationId, noteData);
     
     if (result && result.success) {
       showNotification('Added to Notes!');
-      console.log('Successfully saved note');
+      console.log('Successfully saved note with selection info:', selectionInfo);
       if (panelOpen) {
         updatePanel();
       }
@@ -309,6 +321,37 @@ async function saveSelectedTextAsNote(selectedText, messageElement) {
     console.error('Error in saveSelectedTextAsNote:', error);
     showNotification('Error: ' + error.message);
   }
+}
+
+// Helper function to get the path to a node within a container
+function getNodePath(node, container) {
+  const path = [];
+  let current = node;
+  
+  while (current && current !== container) {
+    const parent = current.parentNode;
+    if (!parent) break;
+    
+    const index = Array.from(parent.childNodes).indexOf(current);
+    path.unshift(index);
+    current = parent;
+  }
+  
+  return path;
+}
+
+// Helper function to get a node from a path
+function getNodeFromPath(path, container) {
+  let current = container;
+  
+  for (const index of path) {
+    if (!current.childNodes[index]) {
+      return null;
+    }
+    current = current.childNodes[index];
+  }
+  
+  return current;
 }
 // ==== END TEXT SELECTION FEATURE ====
 
@@ -466,7 +509,7 @@ async function updatePanel() {
       `).join('');
 
       content.querySelectorAll('.jump-to-pin').forEach(btn => {
-        btn.addEventListener('click', () => jumpToMessage(parseInt(btn.dataset.number)));
+        btn.addEventListener('click', () => jumpToMessage(parseInt(btn.dataset.number), 'pin'));
       });
 
       content.querySelectorAll('.remove-pin').forEach(btn => {
@@ -496,20 +539,24 @@ async function updatePanel() {
       }
 
       content.innerHTML = notes.map(note => `
-        <div class="pinned-message note-item" data-note-id="${note.id}">
+        <div class="pinned-message note-item" data-note-id="${note.id}" data-note-info='${JSON.stringify(note.selectionInfo || {})}'>
           <div class="pin-text">"${escapeHtml(note.text)}"</div>
           <div class="pin-footer">
             <span class="pin-date">${formatDate(note.createdAt)}</span>
             <div class="pin-actions">
-              <button class="jump-to-pin" data-number="${note.messageNumber}" title="Jump to message">Jump</button>
+              <button class="jump-to-note" data-number="${note.messageNumber}" data-note-id="${note.id}" title="Jump to note">Jump</button>
               <button class="remove-note" data-note-id="${note.id}" title="Remove note">Remove</button>
             </div>
           </div>
         </div>
       `).join('');
 
-      content.querySelectorAll('.jump-to-pin').forEach(btn => {
-        btn.addEventListener('click', () => jumpToMessage(parseInt(btn.dataset.number)));
+      content.querySelectorAll('.jump-to-note').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const noteElement = btn.closest('.note-item');
+          const noteInfo = JSON.parse(noteElement.dataset.noteInfo || '{}');
+          jumpToMessage(parseInt(btn.dataset.number), 'note', noteInfo);
+        });
       });
 
       content.querySelectorAll('.remove-note').forEach(btn => {
@@ -527,18 +574,200 @@ async function updatePanel() {
   }
 }
 
-// Jump to a pinned message
-function jumpToMessage(messageNumber) {
+// Jump to a pinned message or note
+function jumpToMessage(messageNumber, type = 'pin', selectionInfo = null) {
+  console.log('jumpToMessage called:', { messageNumber, type, selectionInfo });
+  
   const messageElement = document.querySelector(`[data-message-number="${messageNumber}"]`);
   
-  if (messageElement) {
-    messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    messageElement.classList.add('highlight');
-    setTimeout(() => messageElement.classList.remove('highlight'), 2000);
-    console.log('Jumped to message', messageNumber);
-  } else {
+  if (!messageElement) {
     showNotification('Message not found in current view');
     console.warn('Message not found:', messageNumber);
+    return;
+  }
+
+  if (type === 'pin') {
+    // For pins: scroll to the beginning (top) of the message
+    console.log('Jumping to PIN - scrolling to START of message');
+    messageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    messageElement.classList.add('highlight');
+    setTimeout(() => messageElement.classList.remove('highlight'), 2000);
+    console.log('Jumped to pinned message', messageNumber);
+  } else if (type === 'note') {
+    // For notes: try to jump to the exact selection location
+    console.log('Jumping to NOTE - attempting exact location');
+    
+    if (!selectionInfo || !selectionInfo.startContainerPath || selectionInfo.startContainerPath.length === 0) {
+      console.warn('No selection info available, using text search fallback');
+      // Fallback: try to find the text in the message
+      if (selectionInfo && selectionInfo.text) {
+        jumpToTextInMessage(messageElement, selectionInfo.text);
+      } else {
+        messageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        messageElement.classList.add('highlight');
+        setTimeout(() => messageElement.classList.remove('highlight'), 2000);
+      }
+      return;
+    }
+    
+    try {
+      console.log('Trying to navigate to path:', selectionInfo.startContainerPath);
+      const startNode = getNodeFromPath(selectionInfo.startContainerPath, messageElement);
+      const endNode = getNodeFromPath(selectionInfo.endContainerPath, messageElement);
+      
+      if (startNode && endNode) {
+        console.log('Found start and end nodes, creating range');
+        // Create a range at the exact selection location
+        const range = document.createRange();
+        range.setStart(startNode, selectionInfo.startOffset || 0);
+        range.setEnd(endNode, selectionInfo.endOffset || 0);
+        
+        // Create a highlight wrapper for the selected text
+        const highlightWrapper = document.createElement('mark');
+        highlightWrapper.className = 'note-text-highlight';
+        highlightWrapper.style.backgroundColor = '#ffd70080';
+        highlightWrapper.style.padding = '2px 0';
+        highlightWrapper.style.borderRadius = '3px';
+        highlightWrapper.style.transition = 'background-color 0.3s ease';
+        
+        try {
+          // Wrap the selected text in the highlight
+          range.surroundContents(highlightWrapper);
+          
+          console.log('Scrolling to exact selection location');
+          // Scroll to the highlighted text
+          highlightWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          
+          // Fade out and remove highlight after 2 seconds
+          setTimeout(() => {
+            highlightWrapper.style.backgroundColor = 'transparent';
+            setTimeout(() => {
+              if (highlightWrapper && highlightWrapper.parentNode) {
+                // Unwrap the content
+                const parent = highlightWrapper.parentNode;
+                while (highlightWrapper.firstChild) {
+                  parent.insertBefore(highlightWrapper.firstChild, highlightWrapper);
+                }
+                highlightWrapper.remove();
+              }
+            }, 300);
+          }, 2000);
+          
+          console.log('Successfully jumped to note selection at message', messageNumber);
+        } catch (wrapError) {
+          // If surroundContents fails (e.g., spans multiple elements), use a different approach
+          console.log('Could not wrap text, using alternative highlight method');
+          
+          // Create a temporary element to scroll to
+          const tempElement = document.createElement('span');
+          tempElement.id = 'temp-scroll-target';
+          range.insertNode(tempElement);
+          
+          // Scroll to the exact location
+          tempElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          
+          // Highlight using text selection
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          
+          // Clean up
+          setTimeout(() => {
+            if (tempElement && tempElement.parentNode) {
+              tempElement.remove();
+            }
+            selection.removeAllRanges();
+          }, 2000);
+        }
+      } else {
+        console.warn('Could not find start/end node, trying text search fallback');
+        jumpToTextInMessage(messageElement, selectionInfo.text);
+      }
+    } catch (error) {
+      console.error('Error jumping to exact selection:', error);
+      // Fallback: try text search
+      if (selectionInfo && selectionInfo.text) {
+        jumpToTextInMessage(messageElement, selectionInfo.text);
+      } else {
+        messageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        messageElement.classList.add('highlight');
+        setTimeout(() => messageElement.classList.remove('highlight'), 2000);
+      }
+    }
+  } else {
+    // Default fallback
+    console.log('Default fallback - scrolling to start');
+    messageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    messageElement.classList.add('highlight');
+    setTimeout(() => messageElement.classList.remove('highlight'), 2000);
+  }
+}
+
+// Helper function to jump to text within a message using text search
+function jumpToTextInMessage(messageElement, searchText) {
+  try {
+    console.log('Using text search to find:', searchText.substring(0, 50));
+    
+    // Use window.find to search for the text
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    
+    // Find the text in the document
+    const found = window.find(searchText, false, false, false, false, false, false);
+    
+    if (found) {
+      console.log('Text found, scrolling to selection');
+      const range = selection.getRangeAt(0);
+      
+      // Scroll the selection into view
+      range.startContainer.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Create a highlight wrapper for the found text
+      const highlightWrapper = document.createElement('mark');
+      highlightWrapper.className = 'note-text-highlight';
+      highlightWrapper.style.backgroundColor = '#ffd70080';
+      highlightWrapper.style.padding = '2px 0';
+      highlightWrapper.style.borderRadius = '3px';
+      highlightWrapper.style.transition = 'background-color 0.3s ease';
+      
+      try {
+        // Wrap the found text in the highlight
+        range.surroundContents(highlightWrapper);
+        
+        // Fade out and remove highlight after 2 seconds
+        setTimeout(() => {
+          highlightWrapper.style.backgroundColor = 'transparent';
+          setTimeout(() => {
+            if (highlightWrapper && highlightWrapper.parentNode) {
+              // Unwrap the content
+              const parent = highlightWrapper.parentNode;
+              while (highlightWrapper.firstChild) {
+                parent.insertBefore(highlightWrapper.firstChild, highlightWrapper);
+              }
+              highlightWrapper.remove();
+            }
+            selection.removeAllRanges();
+          }, 300);
+        }, 2000);
+      } catch (wrapError) {
+        // If wrapping fails, just keep the text selected
+        console.log('Could not wrap found text, keeping selection');
+        setTimeout(() => {
+          selection.removeAllRanges();
+        }, 2000);
+      }
+    } else {
+      console.warn('Text not found, scrolling to message start');
+      messageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // For fallback, highlight the whole message
+      messageElement.classList.add('highlight');
+      setTimeout(() => messageElement.classList.remove('highlight'), 2000);
+    }
+  } catch (error) {
+    console.error('Error in text search:', error);
+    messageElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    messageElement.classList.add('highlight');
+    setTimeout(() => messageElement.classList.remove('highlight'), 2000);
   }
 }
 
