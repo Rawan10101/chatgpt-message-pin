@@ -1,13 +1,23 @@
+console.log = (function(oldLog) {
+  return function(...args) {
+    oldLog.apply(console, ['[VERBOSE]', ...args]);
+  };
+})(console.log);
+
 console.log('ChatGPT Pinner: Content script loaded');
 
 let panelOpen = false;
 let panelElement = null;
 let currentConversationId = null;
+let currentTab = 'pins'; // 'pins' or 'notes'
+let messageObserver = null;
 
 // Extract conversation ID from URL
 function extractConversationId() {
   const match = window.location.pathname.match(/\/c\/([a-zA-Z0-9-]+)/);
-  return match ? match[1] : 'default';
+  const id = match ? match[1] : 'default';
+  console.log('Extracted conversation ID:', id);
+  return id;
 }
 
 // Update current conversation ID when URL changes
@@ -16,7 +26,6 @@ function updateConversationId() {
   if (newId !== currentConversationId) {
     currentConversationId = newId;
     console.log('Changed to conversation:', currentConversationId);
-    // Reassign all message numbers for the new conversation
     assignAllMessageNumbers();
     if (panelOpen) {
       updatePanel();
@@ -24,31 +33,72 @@ function updateConversationId() {
   }
 }
 
+// Find all message elements using multiple strategies
+function getAllMessages() {
+  // Strategy 1: Look for data-testid attribute
+  let messages = document.querySelectorAll('[data-testid^="conversation-turn-"]');
+  
+  // Strategy 2: Look for ChatGPT's typical message structure
+  if (messages.length === 0) {
+    messages = document.querySelectorAll('div[class*="group"]');
+    // Filter to only keep actual message elements
+    messages = Array.from(messages).filter(el => {
+      return el.querySelector('[data-message-author-role]') || 
+             el.textContent.length > 20; // Arbitrary minimum length
+    });
+  }
+  
+  // Strategy 3: Look in main content area
+  if (messages.length === 0) {
+    const main = document.querySelector('main');
+    if (main) {
+      const allDivs = main.querySelectorAll('div');
+      messages = Array.from(allDivs).filter(div => {
+        // Look for divs that seem like messages
+        return div.querySelector('[data-message-author-role]') !== null;
+      });
+    }
+  }
+  
+  console.log(`Found ${messages.length} messages using detection strategies`);
+  return Array.from(messages);
+}
+
 // Assign message numbers to all messages based on DOM order
 function assignAllMessageNumbers() {
-  const messages = document.querySelectorAll('[data-testid^="conversation-turn-"]');
+  const messages = getAllMessages();
+  
   messages.forEach((msg, index) => {
     msg.dataset.messageNumber = index + 1;
   });
+  
+  console.log(`Assigned message numbers to ${messages.length} messages`);
+  return messages.length;
 }
 
 // Add pin button to a message element
 function addPinButton(messageElement) {
-  // Skip if button already exists
+  // Don't add if already has button
   if (messageElement.querySelector('.pin-button')) {
     return;
   }
 
-  // Only add pin button to assistant messages (ChatGPT's responses)
+  // Only add to assistant messages
   const authorRole = messageElement.querySelector('[data-message-author-role="assistant"]');
   if (!authorRole) {
-    return; // Skip user messages
+    return;
   }
 
-  // Make sure all messages have numbers assigned
-  assignAllMessageNumbers();
-
+  // Ensure message has a number
+  if (!messageElement.dataset.messageNumber) {
+    assignAllMessageNumbers();
+  }
+  
   const messageNumber = parseInt(messageElement.dataset.messageNumber);
+  if (!messageNumber) {
+    console.warn('Could not get message number for element');
+    return;
+  }
 
   const pinButton = document.createElement('button');
   pinButton.className = 'pin-button';
@@ -60,60 +110,207 @@ function addPinButton(messageElement) {
   pinButton.title = 'Pin this message';
   
   // Check if already pinned
-  PinStorage.isPinned(currentConversationId, messageNumber).then(isPinned => {
-    if (isPinned) {
-      pinButton.classList.add('pinned');
-      pinButton.title = 'Unpin this message';
-    }
-  });
+  if (typeof PinStorage !== 'undefined') {
+    PinStorage.isPinned(currentConversationId, messageNumber).then(isPinned => {
+      if (isPinned) {
+        pinButton.classList.add('pinned');
+        pinButton.title = 'Unpin this message';
+      }
+    }).catch(err => {
+      console.error('Error checking pin status:', err);
+    });
+  }
 
   pinButton.addEventListener('click', async (e) => {
     e.stopPropagation();
+    e.preventDefault();
     await handlePinClick(messageElement, pinButton);
   });
 
-  // Find the best place to insert the button
+  // Find best place to attach button
   const messageContent = messageElement.querySelector('[data-message-author-role]') || messageElement;
   messageContent.style.position = 'relative';
   messageContent.appendChild(pinButton);
+  
+  console.log('Added pin button to message', messageNumber);
 }
 
 // Handle pin/unpin action
 async function handlePinClick(messageElement, button) {
-  const messageNumber = parseInt(messageElement.dataset.messageNumber);
-  const isPinned = button.classList.contains('pinned');
+  try {
+    const messageNumber = parseInt(messageElement.dataset.messageNumber);
+    if (!messageNumber) {
+      console.error('No message number found');
+      showNotification('Error: Could not identify message');
+      return;
+    }
 
-  if (isPinned) {
-    // Unpin
-    await PinStorage.removePin(currentConversationId, messageNumber);
-    button.classList.remove('pinned');
-    button.title = 'Pin this message';
-    showNotification('Message unpinned');
-  } else {
-    // Pin
-    const messageData = {
+    const isPinned = button.classList.contains('pinned');
+
+    if (isPinned) {
+      // Unpin
+      console.log('Unpinning message', messageNumber);
+      await PinStorage.removePin(currentConversationId, messageNumber);
+      button.classList.remove('pinned');
+      button.title = 'Pin this message';
+      showNotification('Message unpinned');
+    } else {
+      // Pin
+      console.log('Pinning message', messageNumber);
+      
+      // Get message text
+      let messageText = messageElement.innerText || messageElement.textContent;
+      messageText = messageText.substring(0, 500); // Limit length
+      
+      const messageData = {
+        messageNumber: messageNumber,
+        text: messageText,
+        pinnedAt: Date.now(),
+        url: window.location.href,
+        conversationId: currentConversationId
+      };
+
+      const result = await PinStorage.addPin(currentConversationId, messageData);
+      
+      if (result && result.success) {
+        button.classList.add('pinned');
+        button.title = 'Unpin this message';
+        showNotification('Message pinned!');
+        console.log('Successfully pinned message', messageNumber);
+      } else {
+        showNotification('Error pinning message');
+        console.error('Pin failed:', result);
+      }
+    }
+
+    if (panelOpen) {
+      updatePanel();
+    }
+  } catch (error) {
+    console.error('Error in handlePinClick:', error);
+    showNotification('Error: ' + error.message);
+  }
+}
+
+// ==== TEXT SELECTION FEATURE ====
+let selectionPopup = null;
+
+document.addEventListener('mouseup', (e) => {
+  setTimeout(() => {
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+
+    // Remove existing popup
+    if (selectionPopup) {
+      selectionPopup.remove();
+      selectionPopup = null;
+    }
+
+    if (selectedText.length > 0) {
+      try {
+        const range = selection.getRangeAt(0);
+        const container = range.commonAncestorContainer;
+        const messageElement = container.nodeType === 3 
+          ? container.parentElement.closest('[data-message-number]')
+          : container.closest('[data-message-number]');
+
+        // Only show popup if selection is in a ChatGPT message
+        if (messageElement) {
+          const isAssistant = messageElement.querySelector('[data-message-author-role="assistant"]');
+          if (isAssistant) {
+            showSelectionPopup(range, selectedText, messageElement);
+          }
+        }
+      } catch (error) {
+        console.error('Error showing selection popup:', error);
+      }
+    }
+  }, 50);
+});
+
+function showSelectionPopup(range, selectedText, messageElement) {
+  try {
+    const rect = range.getBoundingClientRect();
+    
+    selectionPopup = document.createElement('div');
+    selectionPopup.className = 'selection-popup';
+    selectionPopup.innerHTML = `
+      <button class="add-to-notes-btn">Add to Notes</button>
+    `;
+
+    // Position popup below the selection
+    selectionPopup.style.position = 'fixed';
+    selectionPopup.style.left = `${rect.left + rect.width / 2}px`;
+    selectionPopup.style.top = `${rect.bottom + 8}px`;
+    selectionPopup.style.transform = 'translateX(-50%)';
+    selectionPopup.style.zIndex = '10000';
+
+    document.body.appendChild(selectionPopup);
+
+    // Add click handler
+    selectionPopup.querySelector('.add-to-notes-btn').addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await saveSelectedTextAsNote(selectedText, messageElement);
+      window.getSelection().removeAllRanges();
+      if (selectionPopup) {
+        selectionPopup.remove();
+        selectionPopup = null;
+      }
+    });
+    
+    console.log('Showed selection popup for text:', selectedText.substring(0, 50));
+  } catch (error) {
+    console.error('Error in showSelectionPopup:', error);
+  }
+}
+
+// Remove popup when clicking elsewhere
+document.addEventListener('mousedown', (e) => {
+  if (selectionPopup && !selectionPopup.contains(e.target)) {
+    selectionPopup.remove();
+    selectionPopup = null;
+  }
+});
+
+async function saveSelectedTextAsNote(selectedText, messageElement) {
+  try {
+    const messageNumber = parseInt(messageElement.dataset.messageNumber);
+    
+    if (!messageNumber) {
+      showNotification('Error: Could not identify message');
+      return;
+    }
+    
+    console.log('Saving note from message', messageNumber);
+    
+    const noteData = {
+      id: `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      text: selectedText,
       messageNumber: messageNumber,
-      text: messageElement.innerText.substring(0, 500), // First 500 chars
-      timestamp: Date.now(),
+      createdAt: Date.now(),
       url: window.location.href,
       conversationId: currentConversationId
     };
 
-    const result = await PinStorage.addPin(currentConversationId, messageData);
-    if (result.success) {
-      button.classList.add('pinned');
-      button.title = 'Unpin this message';
-      showNotification('Message pinned!');
+    const result = await PinStorage.addNote(currentConversationId, noteData);
+    
+    if (result && result.success) {
+      showNotification('Added to Notes!');
+      console.log('Successfully saved note');
+      if (panelOpen) {
+        updatePanel();
+      }
     } else {
-      showNotification(result.message);
+      showNotification('Error saving note');
+      console.error('Note save failed:', result);
     }
-  }
-
-  // Update panel if open
-  if (panelOpen) {
-    updatePanel();
+  } catch (error) {
+    console.error('Error in saveSelectedTextAsNote:', error);
+    showNotification('Error: ' + error.message);
   }
 }
+// ==== END TEXT SELECTION FEATURE ====
 
 // Show notification
 function showNotification(message) {
@@ -134,24 +331,28 @@ function showNotification(message) {
 
 // Observe DOM for new messages
 function observeMessages() {
-  const observer = new MutationObserver((mutations) => {
-    // Update conversation ID on URL changes
+  // Stop existing observer if any
+  if (messageObserver) {
+    messageObserver.disconnect();
+  }
+
+  messageObserver = new MutationObserver((mutations) => {
     updateConversationId();
-    
-    // Look for message elements
-    const messages = document.querySelectorAll('[data-testid^="conversation-turn-"]');
+    const messages = getAllMessages();
     messages.forEach(msg => addPinButton(msg));
   });
 
-  observer.observe(document.body, {
+  messageObserver.observe(document.body, {
     childList: true,
     subtree: true
   });
 
-  // Initial scan
+  // Initial setup
   updateConversationId();
-  const messages = document.querySelectorAll('[data-testid^="conversation-turn-"]');
+  const messages = getAllMessages();
   messages.forEach(msg => addPinButton(msg));
+  
+  console.log('Message observer started');
 }
 
 // Create and inject the panel
@@ -163,14 +364,18 @@ function createPanel() {
   panel.className = 'pinned-panel hidden';
   panel.innerHTML = `
     <div class="panel-header">
-      <h3>Pinned Messages</h3>
-      <div class="panel-actions">
-        <button id="clear-all-pins" title="Clear all pins in this chat">Clear</button>
-        <button id="close-panel" title="Close">✕</button>
-      </div>
+      <h3>Saved Items</h3>
+      <button id="close-panel" title="Close">✕</button>
+    </div>
+    <div class="panel-tabs">
+      <button class="tab-button active" data-tab="pins">Pinned Responses</button>
+      <button class="tab-button" data-tab="notes">Notes</button>
+    </div>
+    <div class="panel-actions">
+      <button id="clear-all" title="Clear all">Clear All</button>
     </div>
     <div class="panel-content" id="panel-content">
-      <p class="no-pins">No pinned messages yet</p>
+      <p class="no-pins">No items yet</p>
     </div>
   `;
 
@@ -179,20 +384,40 @@ function createPanel() {
 
   // Event listeners
   panel.querySelector('#close-panel').addEventListener('click', togglePanel);
-  panel.querySelector('#clear-all-pins').addEventListener('click', async () => {
-    if (confirm('Clear all pinned messages in this chat?')) {
-      await PinStorage.clearChat(currentConversationId);
+  
+  // Tab switching
+  panel.querySelectorAll('.tab-button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      panel.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentTab = btn.dataset.tab;
       updatePanel();
-      // Update all pin buttons in current view
-      document.querySelectorAll('.pin-button.pinned').forEach(btn => {
-        btn.classList.remove('pinned');
-        btn.title = 'Pin this message';
-      });
-      showNotification('All pins cleared for this chat');
+    });
+  });
+
+  // Clear all button
+  panel.querySelector('#clear-all').addEventListener('click', async () => {
+    if (currentTab === 'pins') {
+      if (confirm('Clear all pinned messages in this chat?')) {
+        await PinStorage.clearChat(currentConversationId);
+        document.querySelectorAll('.pin-button.pinned').forEach(btn => {
+          btn.classList.remove('pinned');
+          btn.title = 'Pin this message';
+        });
+        showNotification('All pins cleared');
+        updatePanel();
+      }
+    } else {
+      if (confirm('Clear all notes in this chat?')) {
+        await PinStorage.clearNotes(currentConversationId);
+        showNotification('All notes cleared');
+        updatePanel();
+      }
     }
   });
 
   updatePanel();
+  console.log('Panel created');
 }
 
 // Toggle panel visibility
@@ -207,55 +432,99 @@ function togglePanel() {
   if (panelOpen) {
     updatePanel();
   }
+  
+  console.log('Panel toggled:', panelOpen ? 'open' : 'closed');
 }
 
 // Update panel content
 async function updatePanel() {
   if (!panelElement) return;
 
-  const pins = await PinStorage.getPins(currentConversationId);
   const content = panelElement.querySelector('#panel-content');
 
-  if (pins.length === 0) {
-    content.innerHTML = '<p class="no-pins">No pinned messages in this chat</p>';
-    return;
-  }
-
-  content.innerHTML = pins.map(pin => `
-    <div class="pinned-message" data-message-number="${pin.messageNumber}">
-      <div class="pin-text">${escapeHtml(pin.text.substring(0, 200))}${pin.text.length > 200 ? '...' : ''}</div>
-      <div class="pin-footer">
-        <span class="pin-date">${formatDate(pin.pinnedAt)}</span>
-        <div class="pin-actions">
-          <button class="jump-to-pin" data-number="${pin.messageNumber}" title="Jump to message">Jump</button>
-          <button class="remove-pin" data-number="${pin.messageNumber}" title="Remove pin">Remove</button>
-        </div>
-      </div>
-    </div>
-  `).join('');
-
-  // Add event listeners
-  content.querySelectorAll('.jump-to-pin').forEach(btn => {
-    btn.addEventListener('click', () => jumpToMessage(parseInt(btn.dataset.number)));
-  });
-
-  content.querySelectorAll('.remove-pin').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const messageNumber = parseInt(btn.dataset.number);
-      await PinStorage.removePin(currentConversationId, messageNumber);
-      updatePanel();
-      // Update button if visible
-      const msgElement = document.querySelector(`[data-message-number="${messageNumber}"]`);
-      if (msgElement) {
-        const pinBtn = msgElement.querySelector('.pin-button');
-        if (pinBtn) {
-          pinBtn.classList.remove('pinned');
-          pinBtn.title = 'Pin this message';
-        }
+  try {
+    if (currentTab === 'pins') {
+      const pins = await PinStorage.getPins(currentConversationId);
+      console.log('Loaded pins:', pins);
+      
+      if (pins.length === 0) {
+        content.innerHTML = '<p class="no-pins">No pinned messages in this chat</p>';
+        return;
       }
-      showNotification('Pin removed');
-    });
-  });
+
+      content.innerHTML = pins.map(pin => `
+        <div class="pinned-message" data-message-number="${pin.messageNumber}">
+          <div class="pin-text">${escapeHtml(pin.text.substring(0, 200))}${pin.text.length > 200 ? '...' : ''}</div>
+          <div class="pin-footer">
+            <span class="pin-date">${formatDate(pin.pinnedAt)}</span>
+            <div class="pin-actions">
+              <button class="jump-to-pin" data-number="${pin.messageNumber}" title="Jump to message">Jump</button>
+              <button class="remove-pin" data-number="${pin.messageNumber}" title="Remove pin">Remove</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      content.querySelectorAll('.jump-to-pin').forEach(btn => {
+        btn.addEventListener('click', () => jumpToMessage(parseInt(btn.dataset.number)));
+      });
+
+      content.querySelectorAll('.remove-pin').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const messageNumber = parseInt(btn.dataset.number);
+          await PinStorage.removePin(currentConversationId, messageNumber);
+          updatePanel();
+          const msgElement = document.querySelector(`[data-message-number="${messageNumber}"]`);
+          if (msgElement) {
+            const pinBtn = msgElement.querySelector('.pin-button');
+            if (pinBtn) {
+              pinBtn.classList.remove('pinned');
+              pinBtn.title = 'Pin this message';
+            }
+          }
+          showNotification('Pin removed');
+        });
+      });
+
+    } else { // notes tab
+      const notes = await PinStorage.getNotes(currentConversationId);
+      console.log('Loaded notes:', notes);
+      
+      if (notes.length === 0) {
+        content.innerHTML = '<p class="no-pins">No notes in this chat<br><small>Select text from ChatGPT responses to add notes</small></p>';
+        return;
+      }
+
+      content.innerHTML = notes.map(note => `
+        <div class="pinned-message note-item" data-note-id="${note.id}">
+          <div class="pin-text">"${escapeHtml(note.text)}"</div>
+          <div class="pin-footer">
+            <span class="pin-date">${formatDate(note.createdAt)}</span>
+            <div class="pin-actions">
+              <button class="jump-to-pin" data-number="${note.messageNumber}" title="Jump to message">Jump</button>
+              <button class="remove-note" data-note-id="${note.id}" title="Remove note">Remove</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      content.querySelectorAll('.jump-to-pin').forEach(btn => {
+        btn.addEventListener('click', () => jumpToMessage(parseInt(btn.dataset.number)));
+      });
+
+      content.querySelectorAll('.remove-note').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const noteId = btn.dataset.noteId;
+          await PinStorage.removeNote(currentConversationId, noteId);
+          updatePanel();
+          showNotification('Note removed');
+        });
+      });
+    }
+  } catch (error) {
+    console.error('Error updating panel:', error);
+    content.innerHTML = '<p class="no-pins">Error loading items</p>';
+  }
 }
 
 // Jump to a pinned message
@@ -266,8 +535,10 @@ function jumpToMessage(messageNumber) {
     messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
     messageElement.classList.add('highlight');
     setTimeout(() => messageElement.classList.remove('highlight'), 2000);
+    console.log('Jumped to message', messageNumber);
   } else {
     showNotification('Message not found in current view');
+    console.warn('Message not found:', messageNumber);
   }
 }
 
@@ -305,15 +576,17 @@ new MutationObserver(() => {
   if (url !== lastUrl) {
     lastUrl = url;
     updateConversationId();
-    // Reset message counter for new conversation
-    messageCounter = 0;
-    // Re-scan messages with new numbers
-    document.querySelectorAll('[data-testid^="conversation-turn-"]').forEach((msg, index) => {
-      msg.dataset.messageNumber = index + 1;
-      messageCounter = index + 1;
-    });
   }
 }).observe(document, { subtree: true, childList: true });
+
+// Listen for messages from background script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'togglePanel') {
+    togglePanel();
+    sendResponse({ success: true });
+  }
+  return true;
+});
 
 // Add floating toggle button
 function createToggleButton() {
@@ -324,20 +597,32 @@ function createToggleButton() {
   button.title = 'Toggle pinned messages (Ctrl+Shift+P)';
   button.addEventListener('click', togglePanel);
   document.body.appendChild(button);
+  console.log('Toggle button created');
 }
 
 // Initialize
 function init() {
   console.log('ChatGPT Pinner: Initializing...');
+  
+  // Check if PinStorage is available
+  if (typeof PinStorage === 'undefined') {
+    console.error('PinStorage not found! Make sure storage.js is loaded first.');
+    setTimeout(init, 500); // Retry after delay
+    return;
+  }
+  
   updateConversationId();
   observeMessages();
   createToggleButton();
   createPanel();
+  
+  console.log('ChatGPT Pinner: Initialization complete');
 }
 
 // Wait for page to be ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
-  init();
+  // Give a small delay to ensure storage.js is loaded
+  setTimeout(init, 100);
 }
