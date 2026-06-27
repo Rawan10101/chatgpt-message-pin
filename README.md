@@ -17,6 +17,8 @@ A Chrome extension that lets you pin important messages in ChatGPT conversations
 ## Visuals
 <img width="450" height="500" alt="image" src="https://github.com/user-attachments/assets/8b099216-2740-4350-9a50-8a44afbdb53b" />
 <img width="450" height="500" alt="image" src="https://github.com/user-attachments/assets/a2e587b5-ecc3-45e4-a352-341f6e67a648" />
+<img width="855" height="341" alt="image" src="https://github.com/user-attachments/assets/bd5198e0-598a-4f83-b080-5ebb8af8242e" />
+
 
 ## Installation
 
